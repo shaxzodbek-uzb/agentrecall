@@ -49,7 +49,7 @@ class Model2VecEmbedder:
         except ImportError as exc:  # pragma: no cover - exercised via guarded tests
             raise EmbeddingsUnavailable(
                 "Semantic search needs the optional 'semantic' extra. "
-                "Install it with:  pip install 'agentrecall[semantic]'"
+                "Install it with:  pip install 'agentrecall-db[semantic]'"
             ) from exc
         self._model = StaticModel.from_pretrained(self._model_name)
         # model2vec exposes the embedding dimension on the loaded model.

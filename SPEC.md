@@ -7,7 +7,7 @@
 ## What it is (positioning)
 
 **Agent memory in a single SQLite file.** No vector database, no server, no cloud, no
-API key. `pip install agentrecall`, point it at a path, and you have persistent memory
+API key. `pip install agentrecall-db`, point it at a path, and you have persistent memory
 for an LLM agent that you can `cp`, `git diff`, and read from any language.
 
 Most memory layers (mem0, Letta/MemGPT, Zep, Cognee) are **infrastructure**: they want a
@@ -52,7 +52,7 @@ tests/                 # pytest; the FTS-only path must need NO third-party deps
 examples/              # runnable snippets
 ```
 
-Distribution name `agentrecall`; import package `agentrecall`. Python >=3.10.
+Distribution name `agentrecall-db` (PyPI); import package `agentrecall`. Python >=3.10.
 License MIT (holder: "Shaxzodbek Sobirov / Blaze"). **Core deps: none.** Everything
 beyond stdlib is an optional extra.
 

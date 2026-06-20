@@ -139,7 +139,7 @@ class SQLiteStore:
             except Exception as exc:  # ImportError, or extension load rejected
                 raise EmbeddingsUnavailable(
                     "Semantic search needs the optional 'semantic' extra (sqlite-vec). "
-                    "Install it with:  pip install 'agentrecall[semantic]'"
+                    "Install it with:  pip install 'agentrecall-db[semantic]'"
                 ) from exc
             self._vec_loaded = True
         # No commit here on purpose: the CREATE participates in the surrounding

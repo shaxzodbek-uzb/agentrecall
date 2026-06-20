@@ -1,7 +1,7 @@
 """agentrecall — agent memory in a single SQLite file.
 
 No vector DB, no server, no cloud. Keyword recall works out of the box on stdlib alone;
-install ``agentrecall[semantic]`` for torch-free hybrid semantic search.
+install ``agentrecall-db[semantic]`` for torch-free hybrid semantic search.
 """
 
 from __future__ import annotations

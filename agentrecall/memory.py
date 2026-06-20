@@ -59,12 +59,12 @@ class Memory:
             if chosen is None:
                 raise EmbeddingsUnavailable(
                     "embeddings=True but model2vec is not installed. "
-                    "Install it with:  pip install 'agentrecall[semantic]'"
+                    "Install it with:  pip install 'agentrecall-db[semantic]'"
                 )
             if not _sqlite_vec_available():
                 raise EmbeddingsUnavailable(
                     "embeddings=True but sqlite-vec is not installed. "
-                    "Install it with:  pip install 'agentrecall[semantic]'"
+                    "Install it with:  pip install 'agentrecall-db[semantic]'"
                 )
             return chosen, True
 

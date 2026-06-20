@@ -1,5 +1,5 @@
 [project]
-name = "agentrecall"
+name = "agentrecall-db"
 version = "0.1.0"
 description = "Agent memory in a single SQLite file — no vector DB, no server, no cloud. Keyword recall on stdlib alone; torch-free hybrid semantic search via model2vec + sqlite-vec. Python lib + MCP server + CLI."
 readme = "README.md"

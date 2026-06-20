@@ -4,7 +4,7 @@ This is a drop-in, embeddings-capable alternative to the official memory MCP ser
 (which persists to a keyword-only JSONL flat file). Here memories live in a portable
 SQLite file and recall can be hybrid keyword + semantic.
 
-Requires the optional ``mcp`` extra:  ``pip install 'agentrecall[mcp]'``.
+Requires the optional ``mcp`` extra:  ``pip install 'agentrecall-db[mcp]'``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ def build_mcp_server(memory: Memory, *, name: str = "agentrecall"):
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
         raise ImportError(
             "The agentrecall MCP server needs the optional 'mcp' extra. "
-            "Install it with:  pip install 'agentrecall[mcp]'"
+            "Install it with:  pip install 'agentrecall-db[mcp]'"
         ) from exc
 
     server = FastMCP(name)

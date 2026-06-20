@@ -3,8 +3,11 @@
 **Agent memory in a single SQLite file.** No vector database, no server, no cloud, no API key.
 
 ```bash
-pip install agentrecall
+pip install agentrecall-db
 ```
+
+> Installs as **`agentrecall-db`** on PyPI (the bare `agentrecall` name was taken). You
+> still `import agentrecall` and run the `agentrecall` CLI — only the install name differs.
 
 ```python
 from agentrecall import Memory
@@ -45,7 +48,7 @@ non-deterministic.
 Three things `agentrecall` does that nothing else combines:
 
 1. **Zero infrastructure.** The core has **no third-party dependencies** — keyword recall
-   runs on Python's stdlib `sqlite3` (FTS5 + BM25). A fresh `pip install agentrecall` with
+   runs on Python's stdlib `sqlite3` (FTS5 + BM25). A fresh `pip install agentrecall-db` with
    nothing else works.
 2. **Semantic search with no torch, no GPU, no download server.** Add the `[semantic]`
    extra and you get hybrid keyword + vector recall powered by
@@ -60,10 +63,10 @@ Three things `agentrecall` does that nothing else combines:
 ## Install
 
 ```bash
-pip install agentrecall                 # core: keyword recall, stdlib only
-pip install "agentrecall[semantic]"     # + torch-free semantic search (model2vec + sqlite-vec)
-pip install "agentrecall[mcp]"          # + MCP server
-pip install "agentrecall[all]"          # everything
+pip install agentrecall-db                 # core: keyword recall, stdlib only
+pip install "agentrecall-db[semantic]"     # + torch-free semantic search (model2vec + sqlite-vec)
+pip install "agentrecall-db[mcp]"          # + MCP server
+pip install "agentrecall-db[all]"          # everything
 ```
 
 ## Semantic search (optional, torch-free)
@@ -111,7 +114,7 @@ Give Claude (or any MCP client) persistent, searchable memory — an embeddings-
 alternative to the official keyword-only JSONL memory server:
 
 ```bash
-pip install "agentrecall[mcp]"
+pip install "agentrecall-db[mcp]"
 agentrecall serve --db ~/.agent-memory.db
 ```
 
