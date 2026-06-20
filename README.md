@@ -203,4 +203,4 @@ tests are skipped automatically when the `[semantic]` extra isn't installed.
 
 ## License
 
-MIT © 2026 Shaxzodbek Sobirov / Blaze
+MIT © 2026 Shaxzodbek Qambaraliyev / Blaze

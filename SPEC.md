@@ -53,7 +53,7 @@ examples/              # runnable snippets
 ```
 
 Distribution name `agentrecall-db` (PyPI); import package `agentrecall`. Python >=3.10.
-License MIT (holder: "Shaxzodbek Sobirov / Blaze"). **Core deps: none.** Everything
+License MIT (holder: "Shaxzodbek Qambaraliyev / Blaze"). **Core deps: none.** Everything
 beyond stdlib is an optional extra.
 
 ## Storage schema (documented & language-agnostic)

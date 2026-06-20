@@ -5,7 +5,7 @@ description = "Agent memory in a single SQLite file — no vector DB, no server,
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "Shaxzodbek Sobirov", email = "shaxzodbek@blaze.uz" }]
+authors = [{ name = "Shaxzodbek Qambaraliyev", email = "shaxzodbek@blaze.uz" }]
 keywords = [
     "agent", "memory", "llm", "sqlite", "mcp", "claude", "local-first",
     "offline", "rag", "embeddings", "fts5", "sqlite-vec", "model2vec",
