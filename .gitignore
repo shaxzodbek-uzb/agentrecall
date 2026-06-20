@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.env
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# agentrecall databases (don't commit local memory stores)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

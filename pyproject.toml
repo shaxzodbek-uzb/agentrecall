@@ -1,0 +1,60 @@
+[project]
+name = "agentrecall"
+version = "0.1.0"
+description = "Agent memory in a single SQLite file — no vector DB, no server, no cloud. Keyword recall on stdlib alone; torch-free hybrid semantic search via model2vec + sqlite-vec. Python lib + MCP server + CLI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Shaxzodbek Sobirov", email = "shaxzodbek@blaze.uz" }]
+keywords = [
+    "agent", "memory", "llm", "sqlite", "mcp", "claude", "local-first",
+    "offline", "rag", "embeddings", "fts5", "sqlite-vec", "model2vec",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Database",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+# The core is deliberately dependency-free: keyword recall runs on the stdlib `sqlite3`
+# module (FTS5). Everything beyond stdlib is an optional extra, imported lazily.
+dependencies = []
+
+[project.optional-dependencies]
+semantic = ["model2vec>=0.3", "sqlite-vec>=0.1.6", "numpy>=1.21"]
+mcp = ["mcp>=1.2"]
+all = ["model2vec>=0.3", "sqlite-vec>=0.1.6", "numpy>=1.21", "mcp>=1.2"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/shaxzodbek-uzb/agentrecall"
+Repository = "https://github.com/shaxzodbek-uzb/agentrecall"
+Issues = "https://github.com/shaxzodbek-uzb/agentrecall/issues"
+
+[project.scripts]
+agentrecall = "agentrecall.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["agentrecall"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
