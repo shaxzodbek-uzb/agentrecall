@@ -48,6 +48,11 @@ class SQLiteStore:
         self.fts_enabled = self._detect_fts5()
         self._vec_loaded = False
         self._ensure_schema()
+        # If this DB already has a vector index (a reopened semantic store), load the
+        # sqlite-vec extension up front so the very first search() can't crash with
+        # "no such module: vec0" before any write has triggered a lazy load.
+        if self.has_vectors():
+            self._load_vec_extension()
 
     # -- setup ----------------------------------------------------------------
 
@@ -137,11 +142,13 @@ class SQLiteStore:
                     "Install it with:  pip install 'agentrecall[semantic]'"
                 ) from exc
             self._vec_loaded = True
+        # No commit here on purpose: the CREATE participates in the surrounding
+        # add()/update() transaction, so a failure writing the vector rolls back the
+        # content row too (atomic first-embedding write).
         self.conn.execute(
             f"CREATE VIRTUAL TABLE IF NOT EXISTS memories_vec USING vec0("
             f"memory_id INTEGER PRIMARY KEY, embedding float[{dim}])"
         )
-        self.conn.commit()
 
     def _load_vec_extension(self) -> bool:
         if self._vec_loaded:
@@ -366,7 +373,7 @@ class SQLiteStore:
         tokens = re.findall(r"\w+", query.lower())
         if not tokens:
             return []
-        sql = "SELECT id, content FROM memories WHERE 1=1"
+        sql = "SELECT id, content, tags FROM memories WHERE 1=1"
         params: list = []
         if namespace is not None:
             sql += " AND namespace = ?"
@@ -376,7 +383,8 @@ class SQLiteStore:
         params.extend(tag_params)
         scored: list[tuple[int, float]] = []
         for row in self.conn.execute(sql, params):
-            text = (row["content"] or "").lower()
+            # Mirror the FTS index, which covers both content and tags.
+            text = (row["content"] or "").lower() + " " + (row["tags"] or "").lower()
             hits = sum(1 for tok in tokens if tok in text)
             if hits:
                 scored.append((row["id"], float(hits)))
@@ -391,9 +399,10 @@ class SQLiteStore:
         tags: list[str] | None,
         limit: int,
     ) -> list[tuple[int, float]]:
-        if not self.has_vectors() and not self._load_vec_extension():
-            return []
-        if not self.has_vectors():
+        # Load the extension whenever it isn't loaded yet — even if the vec table
+        # already exists (reopened DB) — otherwise the MATCH below hits an unloaded
+        # vec0 module and raises "no such module: vec0".
+        if not self._load_vec_extension() or not self.has_vectors():
             return []
         pool = max(limit * 4, 50)
         payload = json.dumps([float(x) for x in embedding])
@@ -427,10 +436,22 @@ class SQLiteStore:
         namespace: str | None = None,
         keep_last: int | None = None,
     ) -> int:
+        """Delete memories and return how many were removed.
+
+        Passing both ``before`` and ``keep_last`` removes the **union**: rows older than
+        ``before`` *or* beyond the newest ``keep_last`` per namespace. With neither
+        criterion this is a no-op (it refuses to wipe everything by accident).
+        """
         if before is None and keep_last is None:
             return 0  # refuse to wipe everything by accident
         ids: set[int] = set()
         if before is not None:
+            # Stored timestamps are UTC ISO strings compared lexically; normalize the
+            # caller's cutoff to UTC so a non-UTC (or naive) `before` can't delete rows
+            # that are actually newer than the intended instant.
+            if before.tzinfo is None:
+                before = before.replace(tzinfo=timezone.utc)
+            before = before.astimezone(timezone.utc)
             sql = "SELECT id FROM memories WHERE created_at < ?"
             params: list = [before.isoformat()]
             if namespace is not None:

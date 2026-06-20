@@ -107,6 +107,12 @@ class Memory:
 
     def add_many(self, items: list[str | dict]) -> list[MemoryRecord]:
         norm: list[dict] = [{"content": it} if isinstance(it, str) else dict(it) for it in items]
+        for i, d in enumerate(norm):
+            if "content" not in d or not isinstance(d["content"], str):
+                raise ValueError(
+                    f"add_many item {i} must be a str or a dict with a string 'content' "
+                    f"key, got {items[i]!r}"
+                )
         if self._semantic and norm:
             assert self._embedder is not None
             embeddings = self._embedder.embed([d["content"] for d in norm])
@@ -136,6 +142,8 @@ class Memory:
         recency_weight: float | None = None,
         importance_weight: float | None = None,
     ) -> list[MemoryHit]:
+        if k <= 0:
+            return []
         ns = namespace if namespace is not None else self.namespace
         pool = max(k * 4, 20)
 
@@ -227,6 +235,11 @@ class Memory:
         namespace: str | None = None,
         keep_last: int | None = None,
     ) -> int:
+        """Bulk-delete memories; returns how many were removed.
+
+        ``before`` (naive datetimes are treated as UTC) and ``keep_last`` (newest N per
+        namespace) combine as a **union**. With neither argument this is a no-op.
+        """
         return self._store.purge(
             before=before,
             namespace=namespace if namespace is not None else self.namespace,

@@ -9,11 +9,13 @@ pip install agentrecall
 ```python
 from agentrecall import Memory
 
-with Memory("agent.db") as mem:
+with Memory("agent.db") as mem:                      # one SQLite file, nothing else running
     mem.add("The user prefers dark mode", tags=["preference"])
     mem.add("User's name is Aziz; lives in Tashkent", metadata={"kind": "fact"})
 
-    for hit in mem.search("what UI settings does the user like?", k=3):
+    # The core install gives you fast keyword recall (SQLite FTS5). For meaning-based
+    # search that matches paraphrases, add the [semantic] extra — see below.
+    for hit in mem.search("dark mode preference", k=3):
         print(hit.score, hit.content)
 ```
 
@@ -178,6 +180,12 @@ sync by triggers, and — only in semantic mode — a `sqlite-vec` vector table.
   and [Zep](https://www.getzep.com/)'s lane. `agentrecall` stays small on purpose.
 - **No automatic summarization.** Memories are stored verbatim. If you want LLM-distilled
   memories, distill before you `add()` — your call, your model, your tokens.
+- **`add()` is append-only.** Re-adding the same text creates a new row (no content
+  dedupe). To revise a memory, keep the integer id returned by `add()` and call
+  `update(id, ...)` / `delete(id)`.
+- **`forget(before=..., keep_last=...)` deletes the union** — rows older than `before`
+  *or* beyond the newest `keep_last` per namespace. With neither argument it's a no-op
+  (to wipe a store, just delete the file).
 
 ## Development
 

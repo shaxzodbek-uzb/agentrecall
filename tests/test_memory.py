@@ -196,3 +196,41 @@ def test_to_dict_is_json_safe(mem):
 def test_invalid_embeddings_value_raises(db_path):
     with pytest.raises(ValueError):
         Memory(db_path, embeddings="sometimes")
+
+
+def test_search_nonpositive_k_returns_empty(mem):
+    mem.add("alpha distinctive content")
+    assert mem.search("alpha", k=0) == []
+    assert mem.search("alpha", k=-3) == []
+
+
+def test_add_many_missing_content_raises(mem):
+    with pytest.raises(ValueError):
+        mem.add_many([{"tags": ["x"]}])  # dict without 'content'
+    assert mem.count() == 0  # nothing partially written
+
+
+def test_forget_before_and_keep_last_is_union(mem):
+    from datetime import datetime, timezone
+
+    for i in range(5):
+        mem.add(f"row {i}")
+    future = datetime.now(timezone.utc).replace(year=2099)
+    # before=future matches all 5; keep_last=2 matches 3; union => all 5 deleted
+    # (an intersection would have deleted only 3).
+    assert mem.forget(before=future, keep_last=2) == 5
+    assert mem.count() == 0
+
+
+def test_forget_before_non_utc_does_not_overdelete(mem):
+    # Regression: a cutoff instant in the past, expressed in a non-UTC timezone whose
+    # ISO string sorts lexically *after* the stored UTC string, must not delete a row
+    # that is actually newer than the cutoff instant.
+    from datetime import datetime, timedelta, timezone
+
+    mem.add("newer than the cutoff instant")
+    cutoff_past = (datetime.now(timezone.utc) - timedelta(hours=1)).astimezone(
+        timezone(timedelta(hours=5))
+    )
+    assert mem.forget(before=cutoff_past) == 0
+    assert mem.count() == 1

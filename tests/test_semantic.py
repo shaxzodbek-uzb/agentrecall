@@ -82,6 +82,31 @@ def test_embeddings_true_without_model2vec(tmp_path, monkeypatch):
         Memory(str(tmp_path / "x.db"), embeddings=True)
 
 
+def test_vector_persistence_and_search_first_after_reopen(tmp_path):
+    # Regression: searching a reopened semantic DB *before* any write in the session
+    # must not crash with "no such module: vec0".
+    db = str(tmp_path / "persist.db")
+    with Memory(db, embeddings=True, embedder=FakeEmbedder()) as m:
+        rid = m.add("persisted vector content").id
+    with Memory(db, embeddings=True, embedder=FakeEmbedder()) as m:
+        assert m.semantic_enabled is True
+        hits = m.search("persisted vector content", k=3)  # first call is a read
+        assert hits and hits[0].id == rid
+
+
+def test_vector_namespace_isolation(tmp_path):
+    m = Memory(str(tmp_path / "ns.db"), embeddings=True, embedder=FakeEmbedder())
+    try:
+        m.add("identical text", namespace="a")
+        m.add("identical text", namespace="b")
+        hits = m.search("identical text", k=5, namespace="a")
+        assert hits
+        assert len(hits) == 1
+        assert all(h.record.namespace == "a" for h in hits)
+    finally:
+        m.close()
+
+
 # -- real model2vec (skipped offline) ---------------------------------------
 
 

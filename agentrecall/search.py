@@ -76,7 +76,7 @@ def fuse_and_rank(
         hits.append(MemoryHit(record=record, score=score))
 
     hits.sort(key=lambda h: h.score, reverse=True)
-    return hits[:limit]
+    return hits[: max(0, limit)]
 
 
 __all__ = ["sanitize_fts_query", "reciprocal_rank_fusion", "fuse_and_rank"]

@@ -86,3 +86,20 @@ def test_touch_increments(tmp_path):
     store.touch([rec.id])
     assert store.get(rec.id).access_count == 2
     store.close()
+
+
+def test_like_fallback_searches_tags(tmp_path):
+    # The FTS index covers (content, tags); the LIKE fallback must too.
+    store = _store(tmp_path)
+    store.add(
+        content="generic note", namespace="default", tags=["urgent"], metadata={}, importance=1.0
+    )
+    store.add(
+        content="another note", namespace="default", tags=["later"], metadata={}, importance=1.0
+    )
+    store.fts_enabled = False
+    hits = store.fts_search("urgent", namespace="default", tags=None, limit=5)
+    ids = {mid for mid, _ in hits}
+    assert len(ids) == 1
+    assert store.get(next(iter(ids))).tags == ["urgent"]
+    store.close()
