@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 @dataclass(slots=True)
@@ -20,6 +20,16 @@ class MemoryRecord:
     updated_at: datetime
     last_accessed_at: datetime | None
     access_count: int
+    expires_at: datetime | None = None
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        """True once ``expires_at`` has passed. Memories without one never expire."""
+        if self.expires_at is None:
+            return False
+        now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        return self.expires_at <= now
 
     def to_dict(self) -> dict:
         """JSON-safe dict (datetimes become ISO-8601 strings)."""
@@ -36,6 +46,7 @@ class MemoryRecord:
                 self.last_accessed_at.isoformat() if self.last_accessed_at else None
             ),
             "access_count": self.access_count,
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
         }
 
 

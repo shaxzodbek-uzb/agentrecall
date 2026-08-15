@@ -28,3 +28,6 @@ htmlcov/
 *.swp
 .idea/
 .vscode/
+
+# uv
+uv.lock

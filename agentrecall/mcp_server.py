@@ -30,9 +30,15 @@ def build_mcp_server(memory: Memory, *, name: str = "agentrecall"):
         tags: list[str] | None = None,
         metadata: dict | None = None,
         importance: float = 1.0,
+        ttl: str | None = None,
     ) -> dict:
-        """Store a new memory verbatim and return the stored record."""
-        record = memory.add(content, tags=tags, metadata=metadata, importance=importance)
+        """Store a new memory verbatim and return the stored record.
+
+        Set ``ttl`` ("30d", "12h", "1h30m", or seconds) for facts that go stale — a
+        temporary preference, a value that's only true for this session. The memory
+        stops being recalled once the deadline passes.
+        """
+        record = memory.add(content, tags=tags, metadata=metadata, importance=importance, ttl=ttl)
         return record.to_dict()
 
     @server.tool()
@@ -44,6 +50,11 @@ def build_mcp_server(memory: Memory, *, name: str = "agentrecall"):
     def forget(memory_id: int) -> bool:
         """Delete a memory by id. Returns True if a row was removed."""
         return memory.delete(memory_id)
+
+    @server.tool()
+    def forget_expired() -> int:
+        """Permanently delete memories whose TTL has elapsed. Returns how many went."""
+        return memory.purge_expired()
 
     @server.tool()
     def list_memories(limit: int = 20) -> list[dict]:
