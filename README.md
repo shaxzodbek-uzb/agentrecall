@@ -97,6 +97,48 @@ mem.add("Critical: API key rotates on the 1st", importance=3.0)
 mem.search("api key", recency_weight=1.0)   # per-call override
 ```
 
+## Expiring memories (TTL)
+
+Not every fact is true forever. A memory added with a `ttl` stops being recalled once its
+deadline passes — no cron job, no cleanup pass, no `if` in your agent loop:
+
+```python
+mem.add("User is debugging the staging deploy", ttl="4h")   # gone after the session
+mem.add("Rate limit resets at 14:00 UTC", ttl="1h")
+mem.add("User's name is Aziz", )                            # no ttl → permanent
+```
+
+`ttl` accepts `"30d"`, `"12h"`, `"1h30m"`, a number of seconds, or a `timedelta`. For an
+absolute deadline, pass `expires_at=<datetime>` instead (the two are mutually exclusive).
+
+Expiry is a **visibility** rule, applied in SQL before the `LIMIT`, so an expired memory
+never occupies a slot in your top-`k`:
+
+```python
+mem.search("staging")          # expired memories are absent
+mem.all()                      # absent
+mem.get(memory_id)             # raises MemoryNotFound
+mem.count()                    # doesn't count them
+
+mem.search("staging", include_expired=True)   # opt back in, on any read
+```
+
+Nothing is deleted until you say so. Rows linger — invisible — until you reclaim the disk:
+
+```python
+mem.purge_expired()            # returns how many rows went
+```
+
+Because it only removes what's already invisible, running it (or never running it) cannot
+change what your agent recalls. To renew or cancel a deadline:
+
+```python
+mem.update(mid, ttl="7d")          # restart the countdown from now
+mem.update(mid, expires_at=None)   # drop the deadline — permanent again
+```
+
+`update()` finds already-expired memories, so a renewal brings one back.
+
 ## Namespaces
 
 Isolate memories per user, per agent, or per session with a namespace:
@@ -130,18 +172,32 @@ agentrecall serve --db ~/.agent-memory.db
 }
 ```
 
-Tools exposed: `remember`, `recall`, `forget`, `list_memories`, `memory_stats`.
+Tools exposed: `remember`, `recall`, `forget`, `forget_expired`, `list_memories`,
+`memory_stats`. `remember` takes an optional `ttl`, so the model can mark a fact as
+session-scoped when it stores it.
 
 ## CLI
 
 ```bash
 agentrecall add "Deadline is July 7" --tags project --importance 2
+agentrecall add "Debugging staging today" --ttl 4h    # expires on its own
 agentrecall search "when is the deadline" -k 3
-agentrecall list --limit 10
-agentrecall stats
+agentrecall list --limit 10 --include-expired
+agentrecall stats                                     # live count + how many expired
 agentrecall forget --keep-last 1000        # prune to the newest 1000 per namespace
+agentrecall forget --expired               # reclaim disk from elapsed TTLs
 agentrecall export --format md > memories.md
 ```
+
+Move a store between machines with the JSON round-trip (`-` reads stdin):
+
+```bash
+agentrecall --db old.db export > memories.json
+agentrecall --db new.db import memories.json
+```
+
+Import accepts either a JSON array or one object per line (JSONL), and preserves tags,
+metadata, importance, namespace, and expiry. Ids are reassigned by the destination.
 
 Every command honours `--db`, `--namespace`, and the `AGENTRECALL_DB` /
 `AGENTRECALL_NAMESPACE` / `AGENTRECALL_EMBEDDINGS` environment variables.
@@ -149,14 +205,17 @@ Every command honours `--db`, `--namespace`, and the `AGENTRECALL_DB` /
 ## API at a glance
 
 ```python
-mem.add(content, *, tags=None, metadata=None, importance=1.0, namespace=None) -> MemoryRecord
+mem.add(content, *, tags=None, metadata=None, importance=1.0, namespace=None,
+        ttl=None, expires_at=None)                                           -> MemoryRecord
 mem.add_many([str | dict, ...])                                              -> list[MemoryRecord]
-mem.search(query, *, k=5, namespace=None, tags=None,
-           recency_weight=None, importance_weight=None)                      -> list[MemoryHit]
-mem.get(id) / mem.update(id, ...) / mem.delete(id)
-mem.all(*, namespace=None, tags=None, limit=None, offset=0)                  -> list[MemoryRecord]
-mem.count(*, namespace=None) -> int
+mem.search(query, *, k=5, namespace=None, tags=None, recency_weight=None,
+           importance_weight=None, include_expired=False)                    -> list[MemoryHit]
+mem.get(id, *, include_expired=False) / mem.update(id, ...) / mem.delete(id)
+mem.all(*, namespace=None, tags=None, limit=None, offset=0,
+        include_expired=False)                                               -> list[MemoryRecord]
+mem.count(*, namespace=None, include_expired=False) -> int
 mem.forget(*, before=None, namespace=None, keep_last=None) -> int           # deleted count
+mem.purge_expired(*, namespace=None) -> int                                 # deleted count
 ```
 
 `tags` filtering matches memories containing **all** of the requested tags.
@@ -169,9 +228,12 @@ No magic. Open it with anything:
 sqlite3 agent.db "SELECT id, content, importance, created_at FROM memories ORDER BY created_at DESC LIMIT 5;"
 ```
 
-Schema: a `memories` table (with JSON `tags`/`metadata` columns), an FTS5 index kept in
-sync by triggers, and — only in semantic mode — a `sqlite-vec` vector table. See
-[`SPEC.md`](SPEC.md) for the full contract.
+Schema: a `memories` table (with JSON `tags`/`metadata` columns and a nullable
+`expires_at`), an FTS5 index kept in sync by triggers, and — only in semantic mode — a
+`sqlite-vec` vector table. See [`SPEC.md`](SPEC.md) for the full contract.
+
+Older database files are migrated in place on open: the `expires_at` column is added and
+existing rows keep `NULL`, i.e. they never expire.
 
 ## Scope & limits (honest defaults)
 
@@ -189,6 +251,9 @@ sync by triggers, and — only in semantic mode — a `sqlite-vec` vector table.
 - **`forget(before=..., keep_last=...)` deletes the union** — rows older than `before`
   *or* beyond the newest `keep_last` per namespace. With neither argument it's a no-op
   (to wipe a store, just delete the file).
+- **TTL hides, it doesn't delete.** An expired memory stays on disk until
+  `purge_expired()`. That's deliberate — expiry is reversible (`update(id, ttl=...)`),
+  and a `SELECT` in `sqlite3` still shows you what an agent has stopped recalling.
 
 ## Development
 

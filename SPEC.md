@@ -59,7 +59,7 @@ beyond stdlib is an optional extra.
 ## Storage schema (documented & language-agnostic)
 
 A `agentrecall` database is a plain SQLite file. Any language can read it. Schema
-(`schema_version = 1`, tracked in `PRAGMA user_version`):
+(`schema_version = 2`, tracked in `PRAGMA user_version`):
 
 ```sql
 CREATE TABLE memories (
@@ -72,10 +72,12 @@ CREATE TABLE memories (
     created_at      TEXT    NOT NULL,                -- ISO-8601 UTC, e.g. 2026-06-20T09:00:00+00:00
     updated_at      TEXT    NOT NULL,
     last_accessed_at TEXT,                           -- nullable
-    access_count    INTEGER NOT NULL DEFAULT 0
+    access_count    INTEGER NOT NULL DEFAULT 0,
+    expires_at      TEXT                             -- nullable; NULL = never expires
 );
 CREATE INDEX idx_memories_namespace ON memories(namespace);
 CREATE INDEX idx_memories_created   ON memories(created_at);
+CREATE INDEX idx_memories_expires   ON memories(expires_at);
 
 -- Keyword index (always present). external-content FTS mirrors `memories`.
 CREATE VIRTUAL TABLE memories_fts USING fts5(
@@ -98,6 +100,20 @@ Rules:
   a `LIKE`-based scan and sets `store.fts_enabled = False` (a warning is emitted once).
 - The vector table is created lazily the first time an embedding is written, using the
   active embedder's dimension. Opening the same DB later in FTS-only mode must NOT error.
+- `expires_at` is a **visibility** rule, not a deletion trigger. A row is live while
+  `expires_at IS NULL OR expires_at > now`; the predicate is applied in SQL, before any
+  `LIMIT`, so an expired row never consumes a result slot. Expired rows persist on disk
+  until `purge_expired()`. Any other language reading the file must apply the same
+  predicate to agree with `agentrecall` about what is recallable.
+
+### Migration
+
+Opening a `schema_version = 1` file upgrades it in place: `expires_at` is added via
+`ALTER TABLE` (existing rows become `NULL`, i.e. never expiring) and `user_version` is set
+to `2`. The keyword index is rebuilt whenever `memories_fts` has to be created against a
+non-empty `memories` table — rows predating the index are otherwise invisible to `MATCH`.
+Row counts cannot detect this drift, because an external-content FTS5 table answers
+`count(*)` from the content table itself.
 
 ## Core types & exact signatures
 
@@ -129,7 +145,9 @@ class MemoryRecord:
     updated_at: datetime          # aware UTC
     last_accessed_at: datetime | None
     access_count: int
+    expires_at: datetime | None = None    # aware UTC; None = never expires
 
+    def is_expired(self, now: datetime | None = None) -> bool: ...
     def to_dict(self) -> dict: ...        # JSON-safe (datetimes -> isoformat strings)
 
 @dataclass(slots=True)

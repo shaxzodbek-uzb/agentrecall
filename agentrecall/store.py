@@ -19,7 +19,10 @@ from datetime import datetime, timezone
 from .errors import EmbeddingsUnavailable, MemoryNotFound, StoreError
 from .models import MemoryRecord
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+#: Sentinel distinguishing "leave this field alone" from an explicit ``None``.
+UNSET = object()
 
 
 def _utcnow() -> datetime:
@@ -30,6 +33,18 @@ def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     return datetime.fromisoformat(value)
+
+
+def _to_utc_iso(value: datetime) -> str:
+    """Normalize to UTC before serializing.
+
+    Timestamps are compared lexically in SQL, which is only sound when every stored
+    string carries the same (UTC) offset — a naive or non-UTC datetime would otherwise
+    sort against a different zero point.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat()
 
 
 class SQLiteStore:
@@ -91,13 +106,17 @@ class SQLiteStore:
                 created_at       TEXT    NOT NULL,
                 updated_at       TEXT    NOT NULL,
                 last_accessed_at TEXT,
-                access_count     INTEGER NOT NULL DEFAULT 0
+                access_count     INTEGER NOT NULL DEFAULT 0,
+                expires_at       TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace);
             CREATE INDEX IF NOT EXISTS idx_memories_created   ON memories(created_at);
             """
         )
+        self._migrate()
+        c.execute("CREATE INDEX IF NOT EXISTS idx_memories_expires ON memories(expires_at)")
         if self.fts_enabled:
+            fts_existed = self._table_exists("memories_fts")
             c.executescript(
                 """
                 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -121,8 +140,43 @@ class SQLiteStore:
                 END;
                 """
             )
+            if not fts_existed:
+                self._rebuild_fts()
         c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self.conn.commit()
+
+    def _table_exists(self, name: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        return row is not None
+
+    def _rebuild_fts(self) -> None:
+        """Index rows that predate the keyword index.
+
+        The sync triggers only fire for writes made while ``memories_fts`` exists, so
+        rows in a database created before it — an older schema, or a SQLite build
+        without FTS5 — are invisible to ``MATCH``. That fails silently: keyword search
+        just returns nothing. Only the one-time creation path reaches here, so the
+        rebuild cost is paid once per database, never on a normal open.
+
+        (Row counts can't detect this: an external-content FTS5 table reads ``count(*)``
+        straight from the content table, so it always agrees with itself.)
+        """
+        if self.conn.execute("SELECT EXISTS(SELECT 1 FROM memories)").fetchone()[0]:
+            self.conn.execute("INSERT INTO memories_fts(memories_fts) VALUES('rebuild')")
+
+    def _migrate(self) -> None:
+        """Bring an older database file up to :data:`SCHEMA_VERSION` in place.
+
+        ``CREATE TABLE IF NOT EXISTS`` above is a no-op on a v1 file, so columns added
+        after v1 have to be patched in explicitly. Adding a nullable column is cheap and
+        leaves every existing row with ``expires_at IS NULL`` — i.e. never expiring,
+        which is exactly the pre-TTL behaviour.
+        """
+        columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(memories)")}
+        if "expires_at" not in columns:
+            self.conn.execute("ALTER TABLE memories ADD COLUMN expires_at TEXT")
 
     # -- vector index (lazy, only when embeddings are written) ----------------
 
@@ -194,6 +248,7 @@ class SQLiteStore:
             updated_at=_parse_dt(row["updated_at"]),  # type: ignore[arg-type]
             last_accessed_at=_parse_dt(row["last_accessed_at"]),
             access_count=row["access_count"],
+            expires_at=_parse_dt(row["expires_at"]),
         )
 
     @staticmethod
@@ -203,6 +258,21 @@ class SQLiteStore:
             return "", []
         parts = [f"EXISTS (SELECT 1 FROM json_each({alias}.tags) WHERE value = ?)" for _ in tags]
         return " AND " + " AND ".join(parts), list(tags)
+
+    @staticmethod
+    def _live_clause(include_expired: bool, alias: str = "memories") -> tuple[str, list]:
+        """Return an ``AND ...`` fragment excluding memories whose TTL has elapsed.
+
+        Expiry is evaluated in SQL rather than in Python so an expired row is filtered
+        *before* the ``LIMIT``, which keeps a page of results full instead of silently
+        shrinking it.
+        """
+        if include_expired:
+            return "", []
+        return (
+            f" AND ({alias}.expires_at IS NULL OR {alias}.expires_at > ?)",
+            [_utcnow().isoformat()],
+        )
 
     # -- CRUD -----------------------------------------------------------------
 
@@ -215,12 +285,23 @@ class SQLiteStore:
         metadata: dict,
         importance: float,
         embedding: list[float] | None = None,
+        expires_at: datetime | None = None,
     ) -> MemoryRecord:
         now = _utcnow().isoformat()
         cur = self.conn.execute(
             "INSERT INTO memories(namespace, content, tags, metadata, importance, "
-            "created_at, updated_at, access_count) VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
-            (namespace, content, json.dumps(tags), json.dumps(metadata), importance, now, now),
+            "created_at, updated_at, access_count, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)",
+            (
+                namespace,
+                content,
+                json.dumps(tags),
+                json.dumps(metadata),
+                importance,
+                now,
+                now,
+                _to_utc_iso(expires_at) if expires_at is not None else None,
+            ),
         )
         memory_id = int(cur.lastrowid)
         if embedding is not None:
@@ -230,8 +311,11 @@ class SQLiteStore:
         assert record is not None
         return record
 
-    def get(self, memory_id: int) -> MemoryRecord | None:
-        row = self.conn.execute("SELECT * FROM memories WHERE id = ?", (memory_id,)).fetchone()
+    def get(self, memory_id: int, *, include_expired: bool = True) -> MemoryRecord | None:
+        live_sql, live_params = self._live_clause(include_expired)
+        row = self.conn.execute(
+            f"SELECT * FROM memories WHERE id = ?{live_sql}", [memory_id, *live_params]
+        ).fetchone()
         return self._row_to_record(row) if row else None
 
     def update(
@@ -243,7 +327,10 @@ class SQLiteStore:
         metadata: dict | None = None,
         importance: float | None = None,
         embedding: list[float] | None = None,
+        expires_at: datetime | None | object = UNSET,
     ) -> MemoryRecord:
+        # include_expired stays on: renewing the TTL of an already-expired memory is a
+        # legitimate way to bring it back, so it must still be findable here.
         if self.get(memory_id) is None:
             raise MemoryNotFound(memory_id)
         sets: list[str] = []
@@ -260,6 +347,9 @@ class SQLiteStore:
         if importance is not None:
             sets.append("importance = ?")
             params.append(importance)
+        if expires_at is not UNSET:
+            sets.append("expires_at = ?")
+            params.append(_to_utc_iso(expires_at) if expires_at is not None else None)
         sets.append("updated_at = ?")
         params.append(_utcnow().isoformat())
         params.append(memory_id)
@@ -296,6 +386,7 @@ class SQLiteStore:
         tags: list[str] | None = None,
         limit: int | None = None,
         offset: int = 0,
+        include_expired: bool = False,
     ) -> list[MemoryRecord]:
         sql = "SELECT * FROM memories WHERE 1=1"
         params: list = []
@@ -305,6 +396,9 @@ class SQLiteStore:
         tag_sql, tag_params = self._tag_clause(tags)
         sql += tag_sql
         params.extend(tag_params)
+        live_sql, live_params = self._live_clause(include_expired)
+        sql += live_sql
+        params.extend(live_params)
         sql += " ORDER BY created_at DESC, id DESC"
         if limit is not None:
             sql += " LIMIT ? OFFSET ?"
@@ -315,13 +409,16 @@ class SQLiteStore:
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_record(r) for r in rows]
 
-    def count(self, *, namespace: str | None = None) -> int:
-        if namespace is None:
-            row = self.conn.execute("SELECT COUNT(*) FROM memories").fetchone()
-        else:
-            row = self.conn.execute(
-                "SELECT COUNT(*) FROM memories WHERE namespace = ?", (namespace,)
-            ).fetchone()
+    def count(self, *, namespace: str | None = None, include_expired: bool = False) -> int:
+        sql = "SELECT COUNT(*) FROM memories WHERE 1=1"
+        params: list = []
+        if namespace is not None:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        live_sql, live_params = self._live_clause(include_expired)
+        sql += live_sql
+        params.extend(live_params)
+        row = self.conn.execute(sql, params).fetchone()
         return int(row[0])
 
     # -- search primitives ----------------------------------------------------
@@ -333,11 +430,18 @@ class SQLiteStore:
         namespace: str | None,
         tags: list[str] | None,
         limit: int,
+        include_expired: bool = False,
     ) -> list[tuple[int, float]]:
         if not query:
             return []
         if not self.fts_enabled:
-            return self._like_search(query, namespace=namespace, tags=tags, limit=limit)
+            return self._like_search(
+                query,
+                namespace=namespace,
+                tags=tags,
+                limit=limit,
+                include_expired=include_expired,
+            )
         sql = (
             "SELECT memories_fts.rowid AS id, bm25(memories_fts) AS rank "
             "FROM memories_fts JOIN memories ON memories.id = memories_fts.rowid "
@@ -350,13 +454,22 @@ class SQLiteStore:
         tag_sql, tag_params = self._tag_clause(tags)
         sql += tag_sql
         params.extend(tag_params)
+        live_sql, live_params = self._live_clause(include_expired)
+        sql += live_sql
+        params.extend(live_params)
         sql += " ORDER BY rank LIMIT ?"
         params.append(limit)
         try:
             rows = self.conn.execute(sql, params).fetchall()
         except sqlite3.OperationalError:
             # Defensive: a malformed MATCH slipped through — degrade to LIKE.
-            return self._like_search(query, namespace=namespace, tags=tags, limit=limit)
+            return self._like_search(
+                query,
+                namespace=namespace,
+                tags=tags,
+                limit=limit,
+                include_expired=include_expired,
+            )
         # bm25 returns lower = better; expose higher = better.
         return [(r["id"], -float(r["rank"])) for r in rows]
 
@@ -367,6 +480,7 @@ class SQLiteStore:
         namespace: str | None,
         tags: list[str] | None,
         limit: int,
+        include_expired: bool = False,
     ) -> list[tuple[int, float]]:
         import re
 
@@ -381,6 +495,9 @@ class SQLiteStore:
         tag_sql, tag_params = self._tag_clause(tags)
         sql += tag_sql
         params.extend(tag_params)
+        live_sql, live_params = self._live_clause(include_expired)
+        sql += live_sql
+        params.extend(live_params)
         scored: list[tuple[int, float]] = []
         for row in self.conn.execute(sql, params):
             # Mirror the FTS index, which covers both content and tags.
@@ -398,6 +515,7 @@ class SQLiteStore:
         namespace: str | None,
         tags: list[str] | None,
         limit: int,
+        include_expired: bool = False,
     ) -> list[tuple[int, float]]:
         # Load the extension whenever it isn't loaded yet — even if the vec table
         # already exists (reopened DB) — otherwise the MATCH below hits an unloaded
@@ -421,6 +539,9 @@ class SQLiteStore:
         tag_sql, tag_params = self._tag_clause(tags)
         sql += tag_sql
         params.extend(tag_params)
+        live_sql, live_params = self._live_clause(include_expired)
+        sql += live_sql
+        params.extend(live_params)
         sql += " ORDER BY knn.distance LIMIT ?"
         params.append(limit)
         rows = self.conn.execute(sql, params).fetchall()
@@ -471,6 +592,23 @@ class SQLiteStore:
             sql += ") WHERE rn > ?"
             params.append(keep_last)
             ids.update(r[0] for r in self.conn.execute(sql, params))
+        return self._delete_ids(ids)
+
+    def purge_expired(self, *, namespace: str | None = None, now: datetime | None = None) -> int:
+        """Permanently delete memories whose TTL has elapsed; returns how many went.
+
+        Expired memories are already invisible to reads, so this only reclaims disk —
+        it can never remove a memory a caller could still see.
+        """
+        cutoff = _to_utc_iso(now) if now is not None else _utcnow().isoformat()
+        sql = "SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at <= ?"
+        params: list = [cutoff]
+        if namespace is not None:
+            sql += " AND namespace = ?"
+            params.append(namespace)
+        return self._delete_ids({r[0] for r in self.conn.execute(sql, params)})
+
+    def _delete_ids(self, ids: set[int]) -> int:
         if not ids:
             return 0
         placeholders = ",".join("?" * len(ids))
@@ -490,4 +628,4 @@ class SQLiteStore:
             pass
 
 
-__all__ = ["SQLiteStore", "SCHEMA_VERSION"]
+__all__ = ["SQLiteStore", "SCHEMA_VERSION", "UNSET"]

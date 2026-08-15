@@ -6,6 +6,7 @@ install ``agentrecall-db[semantic]`` for torch-free hybrid semantic search.
 
 from __future__ import annotations
 
+from .duration import parse_duration
 from .embeddings import Embedder, Model2VecEmbedder, get_default_embedder
 from .errors import (
     AgentRecallError,
@@ -25,6 +26,7 @@ __all__ = [
     "Embedder",
     "Model2VecEmbedder",
     "get_default_embedder",
+    "parse_duration",
     "AgentRecallError",
     "MemoryNotFound",
     "EmbeddingsUnavailable",
