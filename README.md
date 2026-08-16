@@ -1,5 +1,9 @@
 # agentrecall
 
+[![PyPI](https://img.shields.io/pypi/v/agentrecall-db.svg)](https://pypi.org/project/agentrecall-db/)
+[![Python](https://img.shields.io/pypi/pyversions/agentrecall-db.svg)](https://pypi.org/project/agentrecall-db/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **Agent memory in a single SQLite file.** No vector database, no server, no cloud, no API key.
 
 ```bash
