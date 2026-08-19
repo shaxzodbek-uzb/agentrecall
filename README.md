@@ -29,6 +29,10 @@ with Memory("agent.db") as mem:                      # one SQLite file, nothing 
 That's the whole setup. `agent.db` is an ordinary SQLite file you can `cp`, `git diff`,
 back up, inspect with any SQLite tool, and read from any language. Nothing else is running.
 
+<p align="center">
+  <img src="docs/demo.svg" alt="agentrecall storing memories and recalling them from a single SQLite file" width="860">
+</p>
+
 ---
 
 ## Why another memory library?
